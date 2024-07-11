@@ -246,7 +246,7 @@ All_Ests$Param <- row.names(All_Ests)
 resids<-as_tibble(data.frame(stock=data$stk,year=data$yr, resid=obj$report()$R_Resid))
 cor_matrix <- resids %>% pivot_wider(names_from = stock, names_prefix="stock",values_from = resid)  %>%
   select(-year) %>% cor()
-write.table(cor_matrix, paste("C:/github/SalmonLRP_RetroEval/IFCohoStudy/DataOut/ModelFits/", Mod, "_MPDCorrMat.csv", sep=""),row.names=F, col.names=F, sep=",")
+write.table(cor_matrix, paste("C:/ModelFits/", Mod, "_MPDCorrMat.csv", sep=""),row.names=F, col.names=F, sep=",")
 
 
 
