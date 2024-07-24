@@ -1,0 +1,454 @@
+---
+title: "IFC S-R Models"
+author: "Colin Bailey"
+date: "2024-07-18"
+output: html_document
+---
+
+
+Loading the necessary packages and data to run the models in later code chunks.
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(tidyverse)
+library(rstan)
+library(shinystan)
+library(bayesplot)
+library(pkgbuild)
+library(boot)
+library(loo)
+library(MASS)
+#install.packages("remotes")    #run this line and the next once to get access to the sgen solver that DFO has developed
+#remotes::install_github("Pacific-salmon-assess/samSim")  
+library(samSim) #package that DFO created with the sgen solver to estimate sgen given stock recruit parameters
+
+pkgbuild::has_build_tools(debug = TRUE)
+
+rstan_options(auto_write=T)
+
+options(mc.cores = parallel::detectCores())
+
+CoSRDat <- read.csv("Data_in/IFCoho_SRbyCU.csv")
+
+```
+
+Preparing the data for use in Stan models.
+```{r data manipulation}
+
+# Restrict data set to years 1998+ based on recommendation from Michael Arbeider
+srdat <- CoSRDat %>% filter(BroodYear >= 1998) %>% 
+  mutate(yr_num = BroodYear - min(BroodYear) + 1,
+         lnRS = log(Recruits/Spawners),
+         p_3 = Age_3_Recruits/(Age_3_Recruits + Age_4_Recruits),
+         p_4 = 1 - p_3)
+
+```
+
+Simple linearized Ricker models with a survival covariate. The survival covariate is the estimated smolt-to-adult survival as measured from coded wire tag recoveries (see the parameter "gamma" and data "surv_3" and "surv_4" in the Stan model). There is a separate model for each of the 5 CUs as previous work by Holt et al. (2023) indicate that hierarchical models with random intercepts by CU performed more poorly.
+```{r Ricker Models w/out Srep cap}
+#dataset for the model without an Srep cap
+dat <- list("N" = max(srdat$yr_num), #number of years of data
+            "C" = length(unique(srdat$CU_ID)), #number of CUs
+            "year" = t(matrix(data = srdat$yr_num, nrow = max(srdat$yr_num), ncol = length(unique(srdat$CU_ID)))),
+            "p_3" = t(matrix(data = srdat$p_3, nrow = max(srdat$yr_num), ncol = length(unique(srdat$CU_ID)))),
+            "p_4" = t(matrix(data = srdat$p_4, nrow = max(srdat$yr_num), ncol = length(unique(srdat$CU_ID)))),
+            "surv_3" = t(matrix(data = logit(srdat$STAS_Age_3),
+                                nrow = max(srdat$yr_num), ncol = length(unique(srdat$CU_ID)))),
+            "surv_4" = t(matrix(data = logit(srdat$STAS_Age_4),
+                                nrow = max(srdat$yr_num), ncol = length(unique(srdat$CU_ID)))),
+            "lrs" = t(matrix(data = srdat$lnRS, nrow = max(srdat$yr_num), ncol = length(unique(srdat$CU_ID)))),
+            "S" = t(matrix(data = srdat$Spawners/1000,
+                           nrow = max(srdat$yr_num), ncol = length(unique(srdat$CU_ID)))),
+            "mlogit_surv3" = mean(logit(srdat$STAS_Age_3)),
+            "mlogit_surv4" = mean(logit(srdat$STAS_Age_4))) 
+
+
+###need to add 80_smsy to variables to recover and change downstream affected things###
+#running the Stan model
+fit_nocap <- stan(file = "IFC_SR_nocap_model.stan", data = dat, chains=6,
+                     iter=10000, cores=6, thin = 1,
+                     control=list("max_treedepth"=15,"adapt_delta"=0.8),
+                     pars=c("alpha", "beta", "gamma", "sigma", "srep", "smsy_80", "umsy", "nu_Y", "nu_rec", "smsy"))
+
+#saving the model fit and loading the model fit
+saveRDS(fit_nocap, file = "fit_nocap.rds")
+fit_nocap <- readRDS("fit_nocap.rds")
+
+# #pairs plots
+# pairs(fit_nocap, pars = c("alpha"))
+# pairs(fit_nocap, pars = c("beta"))
+# pairs(fit_nocap, pars = c("gamma"))
+# pairs(fit_nocap, pars = c("sigma"))
+
+#fit summary
+mf <- summary(fit_nocap)$summary
+srdat$pred <- mf[36:130,1]
+srdat$pred_rec <- mf[131:225,1]
+
+
+###residual checks###
+
+#lnRS / S
+srdat %>% ggplot(aes(x = Spawners, y = lnRS))+
+  geom_point(colour = "black")+
+  geom_point(aes(x = Spawners, y = pred), colour = "red")+
+  facet_wrap(.~CU_Name)+
+  theme_classic()
+
+
+#predicted and observed points overlaid
+srdat %>% ggplot(aes(x = BroodYear, y = lnRS))+
+  geom_point(colour = "black")+
+  geom_point(aes(x = BroodYear, y = pred), colour = "red")+
+  facet_wrap(.~CU_Name)+
+  theme_classic()
+
+#predicted-observed w/ 0 (mean) line
+srdat %>% ggplot(aes(x = BroodYear, y = pred - lnRS))+
+  geom_point(colour = "red")+
+  geom_hline(yintercept = 0)+
+  facet_wrap(.~CU_Name)+
+  labs(x = "Brood year", y = "Predicted - observed")+
+  theme_classic()
+
+#predicted vs observed with 1:1 line
+srdat %>% ggplot(aes(x = lnRS, y = pred))+
+  geom_point()+
+  geom_abline(slope = 1, intercept = 0)+
+  facet_wrap(.~CU_Name, ncol = 1)+
+  labs(x = "Observed", y = "Predicted")+
+  theme_classic()
+
+#predicted (red) versus observed (black) recruits as a function of spawners
+#summarizing mean proportions of spawners at age
+prop <- srdat %>% group_by(CU_Name) %>% summarize(m_prop3 = mean(p_3), m_prop4 = mean(p_4))
+
+MF <- function(x){
+  y = exp((pull(prop[3,2]) * (mf[6,1] * (x/1000) + mf[11,1] * mlogit_surv3 + mf[1,1])) + 
+    (pull(prop[3,3]) * (mf[6,1] * (x/1000) + mf[11,1] * mlogit_surv4 + mf[1,1]))) * x
+}
+FC <- function(x){
+  y = exp((pull(prop[1,2]) * (mf[7,1] * (x/1000) + mf[12,1] * mlogit_surv3 + mf[2,1])) + 
+    (pull(prop[1,3]) * (mf[7,1] * (x/1000) + mf[12,1] * mlogit_surv4 + mf[2,1]))) * x
+}
+LT <- function(x){
+   y = exp((pull(prop[2,2]) * (mf[8,1] * (x/1000) + mf[13,1] * mlogit_surv3 + mf[3,1])) + 
+    (pull(prop[2,3]) * (mf[8,1] * (x/1000) + mf[13,1] * mlogit_surv4 + mf[3,1]))) * x
+}
+NT <- function(x){
+  y = exp((pull(prop[4,2]) * (mf[9,1] * (x/1000) + mf[14,1] * mlogit_surv3 + mf[4,1])) + 
+    (pull(prop[4,3]) * (mf[9,1] * (x/1000) + mf[14,1] * mlogit_surv4 + mf[4,1]))) * x
+}
+ST <- function(x){
+  y = exp((pull(prop[5,2]) * (mf[10,1] * (x/1000) + mf[15,1] * mlogit_surv3 + mf[5,1])) + 
+    (pull(prop[5,3]) * (mf[10,1] * (x/1000) + mf[15,1] * mlogit_surv4 + mf[5,1]))) * x
+}
+
+mlogit_surv3 = mean(logit(srdat$STAS_Age_3))
+mlogit_surv4 = mean(logit(srdat$STAS_Age_4))
+
+
+fil <- c("Middle_Fraser", "Fraser_Canyon", "Lower_Thompson", "North_Thompson", "South_Thompson")
+sr_plots <- list()
+for(i in 1:length(fil)){
+  sr_plots[[i]] <- srdat %>% filter(CU_Name == fil[i]) %>%  ggplot(aes(x = Spawners, y = Recruits))+
+  geom_point()+
+  geom_point(aes(x = Spawners, y = pred_rec), colour = "red")+
+  geom_function(fun = ifelse(fil[i] == "Middle_Fraser", MF,
+                             ifelse(fil[i] == "Fraser_Canyon", FC,
+                                    ifelse(fil[i] == "Lower_Thompson", LT,
+                                           ifelse(fil[i] == "North_Thompson", NT, ST)))))+
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed")+
+  facet_wrap(.~ CU_Name)+
+  theme_classic()
+}
+sr_plots
+
+#building dataframe to house parameter estimates
+variable <- c(rep("alpha", length(unique(srdat$CU_Name))), rep("beta", length(unique(srdat$CU_Name))),
+              rep("gamma", length(unique(srdat$CU_Name))), rep("sigma", length(unique(srdat$CU_Name))),
+              rep("srep", length(unique(srdat$CU_Name))), rep("smsy_80", length(unique(srdat$CU_Name))),
+              rep("umsy", length(unique(srdat$CU_Name))))
+CU <- rep(unique(srdat$CU_Name), length(unique(variable)))
+
+param <- data.frame(CU, variable)
+param$x_bar <- mf[1:35,1] 
+param$CI_02.5 <- mf[1:35,4] 
+param$CI_50.0 <- mf[1:35,6]
+param$CI_97.5 <- mf[1:35,8]
+
+#object "para" has all of the parameter estimates 
+para <- param %>% mutate(x_bar = ifelse(variable == "alpha", exp(x_bar), x_bar),
+                 CI_02.5 = ifelse(variable == "alpha", exp(CI_02.5), CI_02.5),
+                 CI_50.0 = ifelse(variable == "alpha", exp(CI_50.0), CI_50.0),
+                 CI_97.5 = ifelse(variable == "alpha", exp(CI_97.5), CI_97.5))
+
+para
+
+```
+
+Simple linearized Ricker models with a survival covariate and a strong prior on spawners at replacement (Srep), which limits the value of beta (see the transformed parameters section for the relationship between beta and srep). There is a separate model for each of the 5 CUs as previous work by Holt et al. (2023) indicate that hierarchical models with random slopes by CU performed more poorly.
+```{r Ricker Models w/ Srep cap}
+
+#dataset for the model without an Srep cap
+datcap <- list("N" = max(srdat$yr_num), #number of years of data
+            "C" = length(unique(srdat$CU_ID)), #number of CUs
+            "year" = t(matrix(data = srdat$yr_num, nrow = max(srdat$yr_num), ncol = length(unique(srdat$CU_ID)))),
+            "p_3" = t(matrix(data = srdat$p_3, nrow = max(srdat$yr_num), ncol = length(unique(srdat$CU_ID)))),
+            "p_4" = t(matrix(data = srdat$p_4, nrow = max(srdat$yr_num), ncol = length(unique(srdat$CU_ID)))),
+            "surv_3" = t(matrix(data = logit(srdat$STAS_Age_3),
+                                nrow = max(srdat$yr_num), ncol = length(unique(srdat$CU_ID)))),
+            "surv_4" = t(matrix(data = logit(srdat$STAS_Age_4),
+                                nrow = max(srdat$yr_num), ncol = length(unique(srdat$CU_ID)))),
+            "lrs" = t(matrix(data = srdat$lnRS, nrow = max(srdat$yr_num), ncol = length(unique(srdat$CU_ID)))),
+            "S" = t(matrix(data = srdat$Spawners/1000,
+                           nrow = max(srdat$yr_num), ncol = length(unique(srdat$CU_ID)))),
+            "mlogit_surv3" = mean(logit(srdat$STAS_Age_3)),
+            "mlogit_surv4" = mean(logit(srdat$STAS_Age_4)),
+            "mu_rep" = pull(para %>% filter(variable == "srep") %>% dplyr::select(x_bar)) * 1.4,
+            "sig_rep" = 1414) 
+
+#running the Stan model
+fit_cap <- stan(file = "IFC_SR_priorcap_model.stan", data = datcap, chains=6,
+                     iter=10000, cores=6, thin = 1,
+                     control=list("max_treedepth"=15,"adapt_delta"=0.9),
+                     pars=c("alpha", "beta", "gamma", "sigma", "srep", "smsy_80", "umsy", "nu_Y", "nu_rec", "smsy"))
+
+#saving the model fit and loading the model fit
+saveRDS(fit_cap, file = "fit_priorcap.rds")
+fit_cap <- readRDS("fit_priorcap.rds")
+
+
+# #pairs plots
+# pairs(fit_cap, pars = c("alpha"))
+# pairs(fit_cap, pars = c("beta"))
+# pairs(fit_cap, pars = c("srep"))
+# pairs(fit_cap, pars = c("gamma"))
+# pairs(fit_cap, pars = c("sigma"))
+
+#fit summary
+mf <- summary(fit_cap)$summary
+srdat$pred_cap <- mf[36:130,1]
+srdat$pred_rec_cap <- mf[131:225,1]
+
+
+###residual checks###
+
+#lnRS / S
+srdat %>% ggplot(aes(x = Spawners, y = lnRS))+
+  geom_point(colour = "black")+
+  geom_point(aes(x = Spawners, y = pred_cap), colour = "red")+
+  facet_wrap(.~CU_Name)+
+  theme_classic()
+
+
+#predicted and observed points overlaid
+srdat %>% ggplot(aes(x = BroodYear, y = lnRS))+
+  geom_point(colour = "black")+
+  geom_point(aes(x = BroodYear, y = pred_cap), colour = "red")+
+  facet_wrap(.~CU_Name)+
+  theme_classic()
+
+#predicted-observed w/ 0 (mean) line
+srdat %>% ggplot(aes(x = BroodYear, y = pred_cap - lnRS))+
+  geom_point(colour = "red")+
+  geom_hline(yintercept = 0)+
+  facet_wrap(.~CU_Name)+
+  labs(x = "Brood year", y = "Predicted - observed")+
+  theme_classic()
+
+#predicted vs observed with 1:1 line
+srdat %>% ggplot(aes(x = lnRS, y = pred_cap))+
+  geom_point()+
+  geom_abline(slope = 1, intercept = 0)+
+  facet_wrap(.~CU_Name, ncol = 1)+
+  labs(x = "Observed", y = "Predicted")+
+  theme_classic()
+
+#predicted (red) versus observed (black) recruits as a function of spawners
+#summarizing mean proportions of spawners at age
+prop <- srdat %>% group_by(CU_Name) %>% summarize(m_prop3 = mean(p_3), m_prop4 = mean(p_4))
+
+MF <- function(x){
+  y = exp((pull(prop[3,2]) * (mf[6,1] * (x/1000) + mf[11,1] * mlogit_surv3 + mf[1,1])) + 
+    (pull(prop[3,3]) * (mf[6,1] * (x/1000) + mf[11,1] * mlogit_surv4 + mf[1,1]))) * x
+}
+FC <- function(x){
+  y = exp((pull(prop[1,2]) * (mf[7,1] * (x/1000) + mf[12,1] * mlogit_surv3 + mf[2,1])) + 
+    (pull(prop[1,3]) * (mf[7,1] * (x/1000) + mf[12,1] * mlogit_surv4 + mf[2,1]))) * x
+}
+LT <- function(x){
+   y = exp((pull(prop[2,2]) * (mf[8,1] * (x/1000) + mf[13,1] * mlogit_surv3 + mf[3,1])) + 
+    (pull(prop[2,3]) * (mf[8,1] * (x/1000) + mf[13,1] * mlogit_surv4 + mf[3,1]))) * x
+}
+NT <- function(x){
+  y = exp((pull(prop[4,2]) * (mf[9,1] * (x/1000) + mf[14,1] * mlogit_surv3 + mf[4,1])) + 
+    (pull(prop[4,3]) * (mf[9,1] * (x/1000) + mf[14,1] * mlogit_surv4 + mf[4,1]))) * x
+}
+ST <- function(x){
+  y = exp((pull(prop[5,2]) * (mf[10,1] * (x/1000) + mf[15,1] * mlogit_surv3 + mf[5,1])) + 
+    (pull(prop[5,3]) * (mf[10,1] * (x/1000) + mf[15,1] * mlogit_surv4 + mf[5,1]))) * x
+}
+
+mlogit_surv3 = mean(logit(srdat$STAS_Age_3))
+mlogit_surv4 = mean(logit(srdat$STAS_Age_4))
+
+
+fil <- c("Middle_Fraser", "Fraser_Canyon", "Lower_Thompson", "North_Thompson", "South_Thompson")
+sr_plots <- list()
+for(i in 1:length(fil)){
+  sr_plots[[i]] <- srdat %>% filter(CU_Name == fil[i]) %>%  ggplot(aes(x = Spawners, y = Recruits))+
+  geom_point()+
+  geom_point(aes(x = Spawners, y = pred_rec_cap), colour = "red")+
+  geom_function(fun = ifelse(fil[i] == "Middle_Fraser", MF,
+                             ifelse(fil[i] == "Fraser_Canyon", FC,
+                                    ifelse(fil[i] == "Lower_Thompson", LT,
+                                           ifelse(fil[i] == "North_Thompson", NT, ST)))))+
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed")+
+  facet_wrap(.~ CU_Name)+
+  theme_classic()
+}
+sr_plots
+
+#building dataframe to house parameter estimates
+variable <- c(rep("alpha", length(unique(srdat$CU_Name))), rep("beta", length(unique(srdat$CU_Name))),
+              rep("gamma", length(unique(srdat$CU_Name))), rep("sigma", length(unique(srdat$CU_Name))),
+              rep("srep", length(unique(srdat$CU_Name))), rep("smsy_80", length(unique(srdat$CU_Name))),
+              rep("umsy", length(unique(srdat$CU_Name))))
+CU <- rep(unique(srdat$CU_Name), length(unique(variable)))
+
+param <- data.frame(CU, variable)
+param$x_bar <- mf[1:35,1] 
+param$CI_02.5 <- mf[1:35,4] 
+param$CI_50.0 <- mf[1:35,6]
+param$CI_97.5 <- mf[1:35,8]
+
+#object "para" has all of the parameter estimates 
+para_cap <- param %>% mutate(x_bar = ifelse(variable == "alpha", exp(x_bar), x_bar),
+                 CI_02.5 = ifelse(variable == "alpha", exp(CI_02.5), CI_02.5),
+                 CI_50.0 = ifelse(variable == "alpha", exp(CI_50.0), CI_50.0),
+                 CI_97.5 = ifelse(variable == "alpha", exp(CI_97.5), CI_97.5)) 
+
+para_cap
+
+```
+
+Extracting parameter posteriors from the no-cap and prior cap models to solve for sgen, including mean and credible interval .
+```{r calculate mean and CIs for sgen}
+
+###Starting with sgen estimates
+#extracting the posteriors for the no-cap and prior cap models - there are 30000 estimates per parameter per model
+beta_nc <- as.data.frame(extract(fit_nocap, pars = "beta")$beta)
+beta_c <- as.data.frame(extract(fit_cap, pars = "beta")$beta)
+beta <- rbind(beta_nc, beta_c)
+
+alpha_nc <- as.data.frame(extract(fit_nocap, pars = "alpha")$alpha)
+alpha_c <- as.data.frame(extract(fit_cap, pars = "alpha")$alpha)
+alpha <- rbind(alpha_nc, alpha_c)
+
+gamma_nc <- as.data.frame(extract(fit_nocap, pars = "gamma")$gamma)
+gamma_c <- as.data.frame(extract(fit_cap, pars = "gamma")$gamma)
+gamma <- rbind(gamma_nc, gamma_c)
+
+sigma_nc <- as.data.frame(extract(fit_nocap, pars = "sigma")$sigma)
+sigma_c <- as.data.frame(extract(fit_cap, pars = "sigma")$sigma)
+sigma <- rbind(sigma_nc, sigma_c)
+
+smsy_nc <- as.data.frame(extract(fit_nocap, pars = "smsy")$smsy)
+smsy_c <- as.data.frame(extract(fit_cap, pars = "smsy")$smsy)
+smsy <- rbind(smsy_nc, smsy_c)
+
+#calculating a' (because all models use a survival covariate, we need to add alpha + gamma*mean_survival)
+logA <- as.data.frame(matrix(nrow = nrow(alpha), ncol = ncol(alpha)))
+
+for(i in 1:ncol(alpha)){
+  for(j in 1:nrow(alpha)){
+    logA[j,i] = gamma[j,i] * mlogit_surv3 + alpha[j,i] 
+  }
+}
+
+#creating a list of dataframes of parameter vectors to feed to the sgen solver
+theta_mf = data.frame(alpha = as.vector(logA[,1]), beta = as.vector(-beta[,1]), sigma = as.vector(sigma[,1]))
+theta_fc = data.frame(alpha = as.vector(logA[,2]), beta = as.vector(-beta[,2]), sigma = as.vector(sigma[,2]))
+theta_lt = data.frame(alpha = as.vector(logA[,3]), beta = as.vector(-beta[,3]), sigma = as.vector(sigma[,3]))
+theta_nt = data.frame(alpha = as.vector(logA[,4]), beta = as.vector(-beta[,4]), sigma = as.vector(sigma[,4]))
+theta_st = data.frame(alpha = as.vector(logA[,5]), beta = as.vector(-beta[,5]), sigma = as.vector(sigma[,5]))
+theta <- list(theta_mf, theta_fc, theta_lt, theta_nt, theta_st)
+
+#calculating sgen for each iteration of both models
+sgen <- matrix(ncol = length(unique(srdat$CU_Name)), nrow = nrow(theta_mf))
+for(i in 1:ncol(alpha)){
+  for(j in 1:nrow(alpha)){
+    sgen[j,i] <- sGenSolver(unlist(theta[[i]][j,]), smsy[j,i]/1000)$fit*1000
+  }
+}
+
+#summarizing sgen by CU
+CU_Name = c("Middle_Fraser", "Fraser_Canyon", "Lower_Thompson", "North_Thompson", "South_Thompson")
+x_bar = c(mean(sgen[,1]), mean(sgen[,2]), mean(sgen[,3]), mean(sgen[,4]), mean(sgen[,5]))
+sgen_summ <- data.frame(CU_Name, x_bar)
+sgen_summary <- sgen_summ %>% mutate(CI_0.025 = NA,
+                     CI_0.500 = NA,
+                     CI_0.975 = NA,)
+sgen_summary[1,3:5] <- quantile(sgen[,1], probs = c(0.025, 0.5, 0.975))
+sgen_summary[2,3:5] <- quantile(sgen[,2], probs = c(0.025, 0.5, 0.975))
+sgen_summary[3,3:5] <- quantile(sgen[,3], probs = c(0.025, 0.5, 0.975))
+sgen_summary[4,3:5] <- quantile(sgen[,4], probs = c(0.025, 0.5, 0.975))
+sgen_summary[5,3:5] <- quantile(sgen[,5], probs = c(0.025, 0.5, 0.975))
+
+sgen_summary
+
+write.csv(sgen_summary, "Data_out/sgen_summary.csv")
+
+```
+
+Extracting posteriors from the no-cap and prior cap models to calculate the average parameter values and credible intervals for 80% smsy and umsy. 
+```{r calculate mean and CIs for 80% smsy & umsy}
+
+#smsy summary
+smsy_nc <- as.data.frame(extract(fit_nocap, pars = "smsy_80")$smsy_80)
+smsy_c <- as.data.frame(extract(fit_cap, pars = "smsy_80")$smsy_80)
+smsy <- rbind(smsy_nc, smsy_c)
+
+#summarizing sgen by CU
+CU_Name = c("Middle_Fraser", "Fraser_Canyon", "Lower_Thompson", "North_Thompson", "South_Thompson")
+x_bar = c(mean(smsy[,1]), mean(smsy[,2]), mean(smsy[,3]), mean(smsy[,4]), mean(smsy[,5]))
+smsy_summ <- data.frame(CU_Name, x_bar)
+smsy_summary <- smsy_summ %>% mutate(CI_0.025 = NA,
+                     CI_0.500 = NA,
+                     CI_0.975 = NA,)
+smsy_summary[1,3:5] <- quantile(smsy[,1], probs = c(0.025, 0.5, 0.975))
+smsy_summary[2,3:5] <- quantile(smsy[,2], probs = c(0.025, 0.5, 0.975))
+smsy_summary[3,3:5] <- quantile(smsy[,3], probs = c(0.025, 0.5, 0.975))
+smsy_summary[4,3:5] <- quantile(smsy[,4], probs = c(0.025, 0.5, 0.975))
+smsy_summary[5,3:5] <- quantile(smsy[,5], probs = c(0.025, 0.5, 0.975))
+
+smsy_summary
+
+write.csv(smsy_summary, "Data_out/smsy_summary.csv")
+
+#umsy summary
+umsy_nc <- as.data.frame(extract(fit_nocap, pars = "umsy")$umsy)
+umsy_c <- as.data.frame(extract(fit_cap, pars = "umsy")$umsy)
+umsy <- rbind(umsy_nc, umsy_c)
+
+#summarizing sgen by CU
+CU_Name = c("Middle_Fraser", "Fraser_Canyon", "Lower_Thompson", "North_Thompson", "South_Thompson")
+x_bar = c(mean(umsy[,1]), mean(umsy[,2]), mean(umsy[,3]), mean(umsy[,4]), mean(umsy[,5]))
+umsy_summ <- data.frame(CU_Name, x_bar)
+umsy_summary <- umsy_summ %>% mutate(CI_0.025 = NA,
+                     CI_0.500 = NA,
+                     CI_0.975 = NA,)
+umsy_summary[1,3:5] <- quantile(umsy[,1], probs = c(0.025, 0.5, 0.975))
+umsy_summary[2,3:5] <- quantile(umsy[,2], probs = c(0.025, 0.5, 0.975))
+umsy_summary[3,3:5] <- quantile(umsy[,3], probs = c(0.025, 0.5, 0.975))
+umsy_summary[4,3:5] <- quantile(umsy[,4], probs = c(0.025, 0.5, 0.975))
+umsy_summary[5,3:5] <- quantile(umsy[,5], probs = c(0.025, 0.5, 0.975))
+
+umsy_summary
+
+write.csv(umsy_summary, "Data_out/umsy_summary.csv")
+```
+
+
