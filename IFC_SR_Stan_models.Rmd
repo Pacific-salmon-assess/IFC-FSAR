@@ -5,6 +5,7 @@ date: "2024-07-18"
 output: html_document
 ---
 
+The purpose of this Rmarkdown document is to provide a reproducible script for generating IFC stock-recruitment (S-R) parameters. Following the Holt et al. 2023 paper, there are two separate sets of IFC coho Ricker models used to estimate S-R parameters, after which these parameter estimates are combined by estimating means and quantiles from the combined posteriors of both model sets. The first model set uses a traditional Ricker model modified to account for a) 2 different ages at return, and b) a survival covariate using a survival index based on coded wire tag recoveries. From the first set of models (1 model for each CU), Srep (spawners at replacement, aka carrying capacity) was calculated for each CU and then multiplied by 1.4 (as per Holt et al. 2023) to create informative priors for Srep in the second set of models. The SD of these informative priors was set to 1414 as per Holt et al. 2023. Srep became an estimated parameter with an informative prior in the second set of models, and beta was calculated using the other estimated parameters in the model.
 
 Loading the necessary packages and data to run the models in later code chunks.
 ```{r setup, include=FALSE}
