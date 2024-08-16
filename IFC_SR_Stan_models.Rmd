@@ -1,5 +1,5 @@
 ---
-title: "IFC S-R Models"
+title: "Interior Faser Coho Stock-Recruitment Models"
 author: "Colin Bailey"
 date: "2024-07-18"
 output: html_document
