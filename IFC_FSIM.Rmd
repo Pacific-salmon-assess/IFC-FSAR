@@ -1,0 +1,303 @@
+---
+title: "RPA_FSIM"
+author: "Colin Bailey"
+date: "2024-10-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(nlme)
+library(scales)
+library(tidyverse)
+library(rstan)
+library(shinystan)
+library(bayesplot)
+library(pkgbuild)
+
+Ricker_mod <- readRDS("fit_nocap.rds")
+Ricker_PriorCap_mod <- readRDS("fit_priorcap.rds")
+
+```
+
+
+```{r data prep}
+
+Ricker <- as.data.frame(extract(Ricker_mod, pars = c("alpha", "beta", "gamma", "sigma")))
+write.csv(Ricker, "Ricker.csv")
+
+Ricker_PriorCap <- as.data.frame(extract(Ricker_PriorCap_mod, pars = c("alpha", "beta", "gamma", "sigma")))
+write.csv(Ricker_PriorCap, "Ricker_PriorCap.csv")
+
+```
+
+
+```{r FSIM prep}
+
+### Forward simulation to look at performance of alternate harvest rates given productivity and assumed future smolt-to-adult survival
+rm(list=ls(all=TRUE))
+start_time <- Sys.time()
+
+#function for rounding numbers
+round2 = function(x, digits) {
+  posneg = sign(x)
+  z = abs(x)*10^digits
+  z = z + 0.5 + sqrt(.Machine$double.eps)
+  z = trunc(z)
+  z = z/10^digits
+  z*posneg
+}
+
+Ncu=5 # number of CUs
+
+#Ntrials=500	# of trials to simulate (there is a precedent for running 500 trials - stability in forward simulation occurs at this number of iterations)
+Ntrials=10	# of trials to simulate - how many times do you want it to run for each combination of exploitation rate and survival (set to 500 once everythign is running)
+
+CUname=c("Middle_Fraser","Fraser_Canyon","Lower_Thompson","North_Thompson","South_Thompson","IFC SMU")
+MUbench=33500			 	 #IFC SMU Target where there is a 66% probability of all CUs being amber or better status
+#MUbench=65300			 	 #IFC SMU Target where there is a 90% probability of all CUs being amber or better status
+
+
+fyr=2018;lyr=fyr+14;Yr=seq(fyr,lyr);Nyrs=length(Yr)
+fyrToUse=2022;lyrToUse=2031;NyrsToUse=lyrToUse-fyrToUse+1
+imin=which(Yr==fyrToUse);imax=which(Yr==lyrToUse)	#range of years to include in status assessment
+
+
+#calculate average proportion at age 3 per conservation unit
+#simulation assumes static proportion of age 3 recruits
+d0=read.csv(file="Data_in\\IFCoho_SRbyCU.csv",header=T)
+pAge3=vector(length=Ncu)
+for(icu in 1:Ncu){
+	d1=subset(d0,CU_ID==icu)
+	pAge3[icu]=mean(d1$Age_3_Rec/d1$Recruits)
+}
+
+#set to look at survival within the context of the last 3 generations
+lnSDstas = sd( c(log(d0$STAS_Age_3[which(d0$CU_ID == 1 & d0$BroodYear > 2007)] ), log(d0$STAS_Age_4[nrow(d0)]) )) # Standard Deviation of smolt-to-adult survival to calculate lognormal error of smolt-to-adult survival later
+
+sigma <- sd( c(d0$ER_Age_3[d0$CU_ID == 1], d0$ER_Age_4[nrow(d0)] ))	# Standard Deviation of ER to calculate beta error of ER later
+
+d0=read.csv(file="Data_in\\IFCoho_escpByCU.csv",header=T)
+
+ERset= c(0.068, # 1 SD below current (also 50% of current)
+         0.125, # current average
+         0.183, # 1 SD above current
+         seq(0, 0.3, by = 0.01))
+
+STASset= c(0.003, # minimum observed, worst case scenario
+         #0.010, # current mean
+         0.041, # max in the current regime, best case scenario
+#         seq(0.004, 0.04, by = 0.001))
+         seq(0.001, 0.04, by = 0.001))
+
+
+fnout3 <- "Data_out/Fsim_All_Models_Full_Output.out" #text file used to save each loop of the simulation outside of R
+write(file = fnout3, "Model baseER baseSTAS trial end.suc freq.suc", ncolumns = 1, append = F)
+
+```
+
+
+```{r simulation loop}
+
+#loop 1 just switching between the 2 models
+for(itype in 1:2){ 
+
+	ModName=switch(itype,"Ricker","Ricker_PriorCap") #make these match with Stan model names
+	BaseFN=paste("Fsim_", "_", ModName,sep="")
+	
+	fnout=paste("Data_out/", BaseFN,".out",sep="") #creating a new data out file for the specific model
+	write(file=fnout,"ConObj STAS ER Mean.end Mean Ci0.1 Ci0.25 Ci0.50 Ci0.75 Ci0.90", ncolumns=1, append=F)
+	
+	fnout2 = paste("Data_out/", BaseFN, "_Esc.out", sep="") #is the text file with the full raw data of all the simulation runs
+	write(file = fnout2, "Model baseER baseSTAS Ncu trial ry esc", ncolumns = 1, append = F)
+	
+	#Posterior distribution from Ricker, Ricker-PriorCap of parameter sets to drive production dynamcs
+	p=read.csv(file=paste(ModName, ".csv",sep=""),header=T)
+	Nmcmc=dim(p)[1]
+	postrecs=round(runif(n=Ntrials,min=1,max=Nmcmc),digits=0)	#random pick of parameter sets for Ntrial simulations from posterior
+	write.table(matrix(postrecs, ncol = 1), file = paste("Data_out/", BaseFN, "_postrecs.out", sep = ""), row.names = F, col.names = "set")
+
+
+	for(iSTAS in STASset){ # for every value in the smolt-to-adult survival set
+
+		BaseSTAS=iSTAS
+
+		for(ih in ERset){ # for every value in the exploitation rate set
+			
+		  BaseER=ih
+		  
+		  #when BaseER not zero, setting up variation around ER with a beta distribution (ER bounded between 0 and 1)
+		  if(BaseER != 0) ERshape1 <- BaseER^2 * (((1-BaseER)/sigma^2) - (1/BaseER)) 
+		  if(BaseER != 0) ERshape2 <- ERshape1 * (1/BaseER - 1)
+
+			TotEsc=matrix(nrow=Ntrials,ncol=Nyrs,data=0) # empty matrix to be filled with SMU escapement values
+			Status=0	# To be filled by Mean Frequency of Success
+			
+			Esc=array(data=0,dim=c(Ntrials,Nyrs,Ncu)) # empty array to be filled with CU escapement values
+			
+			#now going through each conservation unit
+			for (icu in 1:Ncu){
+
+				IniEsc=vector(length=4) #Get initial escapements 2017-2020
+				d1=subset(d0,CU_ID==icu & ReturnYear>=fyr & ReturnYear<=fyr+3)
+				IniEsc=d1$Escapement
+				
+				# For selecting parameters later, combining paramater name with icu number	
+				icol1=which(names(p)==paste("alpha.",icu,sep=""));icol2=which(names(p)==paste("beta.",icu,sep=""));icol3=which(names(p)==paste("gamma.",icu,sep=""))
+
+				#actually running the simulation here by CU and iteration (1-500)
+				for(isim in 1:Ntrials){
+					irow=postrecs[isim]	# assign initial posterior distribution starting row
+
+					for(iyr in 1:Nyrs){
+
+					  # assign parameter values from set for CU
+					  alpha=p[irow,icol1]
+					  b=p[irow,icol2]
+					  g=p[irow,icol3]
+
+#						if(Yr[iyr]<=2018){ #Use observed escapements for '15-'18
+					  if(Yr[iyr]<=2022){ #Use observed escapements for '19-'22
+					    Sp=IniEsc[iyr]
+							Esc[isim,iyr,icu]=IniEsc[iyr]	
+							
+						} else {
+							Sp=Esc[isim,iyr,icu]
+							
+						}
+
+						if(iyr<=Nyrs-4){
+						  
+						  
+						  if(iyr==1)LSurv4=log(rlnorm(1, meanlog = log(BaseSTAS), sdlog = lnSDstas)) 
+						  if(iyr== 1 & LSurv4>log(0.0671))LSurv4=log(0.0671);if(iyr== 1 & LSurv4<log(0.0027))LSurv4=log(0.0027) #if survival exceeds maximum observed survival, set to max, and if below the minimum observed, set to minimum (based on records going back to 1985)
+						  
+						  LSurv3 = LSurv4 # STAS of this years Age 3s is the same as prior years Age 4s
+
+							LSurv=log(rlnorm(1, meanlog = log(BaseSTAS), sdlog = lnSDstas))	#account for variation in smolt-to-adult survival among years, adding lognormal variability
+							if(LSurv>log(0.0671))LSurv=log(0.0671);if(LSurv<log(0.0027))LSurv=log(0.0027) # bind LSurv by % above and below historic max and min
+							
+							LSurv4 = LSurv # Age 4s get new STAS
+							
+							# Aplpha, b, and g, are shared between Age 3 and 4 but LSurv is different
+							Rec3 = pAge3[icu] * exp(pAge3[icu] * (b*(Sp/1000) + g*LSurv3 + alpha) + (1 - pAge3[icu]) * (b*(Sp/1000) + g*LSurv4 + alpha)) * Sp	#calculating the age 3 recruits
+							Rec4 = (1 - pAge3[icu]) * exp(pAge3[icu] * (b*(Sp/1000) + g*LSurv3 + alpha) + (1 - pAge3[icu]) * (b*(Sp/1000) + g*LSurv4 + alpha)) * Sp #calculating the age 4 recruits
+							
+							
+							#Rec is NaN or Inf because Sp is too large so X>700 in exp(X). 
+							if(is.na(Rec3)==T | Rec3>1e6/2) Rec3=1e6/2
+							if(is.na(Rec4)==T | Rec4>1e6/2) Rec4=1e6/2
+							
+							if(iyr==1 & BaseER != 0){ 
+							  ER4=rbeta(1, ERshape1, ERshape2)
+							} else if(iyr== 1 & BaseER == 0) { 
+							  ER4 = BaseER # assuming perfect 0 fishing rate, rbeta does not sample well at mu = 0
+							  }
+							
+							ER3 = ER4 # Exploitation Rate of this years Age 3s is the same as prior years Age 4s
+
+							if(BaseER != 0) {
+							  ER4=rbeta(1, ERshape1, ERshape2) #account for variation in ER among years, adding beta distributed variability
+							
+							} else if(BaseER == 0) {
+							  ER4 = BaseER # assuming perfect 0 fishing rate
+							}
+							 
+							 
+							#Predict escapement in 3 and 4 years given recruitment and age structure
+							if(Yr[iyr+3]>=fyr) Esc[isim,iyr+3,icu]=Esc[isim,iyr+3,icu]+Rec3*(1-ER3)
+							Esc[isim,iyr+4,icu]=Esc[isim,iyr+4,icu]+Rec4*(1-ER4)
+							
+							# Quasi-extirpation Threshold of 100 (from literature, i.e. an assumption). ***need to note whether this is active or not
+							if(Esc[isim,iyr+1,icu] <= 100 & 
+							   Esc[isim,iyr+2,icu] <= 100 & 
+							   Esc[isim,iyr+3,icu] <= 100) Esc[isim,c(iyr+1, iyr+2,iyr+3, iyr+4),icu] = 0
+
+						}
+					}
+					
+				}#isim
+				
+				icuEsc <- data.frame(Model = rep(ModName, Ntrials*length(Yr)),
+				                     baseER = rep(BaseER, Ntrials*length(Yr)),
+				                     baseSTAS = rep(BaseSTAS, Ntrials*length(Yr)),
+				                     Ncu = rep(icu, Ntrials*length(Yr)),
+				                     trial = rep(c(1:Ntrials), each = length(Yr)),
+				                     ry = rep(Yr, Ntrials),
+				                     esc = as.vector(t(Esc[ , , icu])))
+				
+				write.table(file=fnout2, icuEsc, append=T, row.names = F, col.names = F) # Save Simulation Data
+				
+				CP=matrix(data=0,nrow=Ntrials,ncol=5) #Compute confidence intervals on conservation performance - i.e., is the SMU above the benchmark set above (e.g., 33 500)
+
+			}#icu
+			
+			
+			#Calculate DU geomean and proportion of simulation-years where geometric mean escapent for all CUs exceed the 1000 spawner requirements (for all subpops) for all CUs in same year
+			for(isim in 1:Ntrials){
+				for(iyr in 1:Nyrs){
+					TotEsc[isim,iyr]=sum(Esc[isim,iyr,1:Ncu])
+				}
+			}
+			
+			Pass2=matrix(data=0,nrow=Ntrials,ncol=NyrsToUse)
+			GeoMean=matrix(data=0,nrow=Ntrials,ncol=NyrsToUse)
+			for(isim in 1:Ntrials){
+				jj=0			
+				for(ii in imin:imax){
+					jj=jj+1
+					GeoMean[isim,jj]=prod(TotEsc[isim,ii-2],TotEsc[isim,ii-1], TotEsc[isim,ii])^(1/3)
+				}
+				
+				CP[isim,5]=length(which(GeoMean[isim,1:NyrsToUse]>=MUbench))/NyrsToUse	#proportion of years where target exceeded for each trial
+				CP[isim,1]= ifelse(GeoMean[isim,NyrsToUse]>=MUbench, 1, 0)	#was target exceeded for each trial's last year
+			}
+
+			Status=length(which(GeoMean>=MUbench))/(Ntrials*NyrsToUse)
+			Status2 = mean(CP[ , 1])
+
+			####################need to check the line below and figure out why its not functioning###################
+			CI_MUhi=as.numeric(quantile(CP[,5],prob=c(0.1, 0.25, 0.50, 0.75, 0.9)))
+			
+			write(file=fnout,c("MU_Target", BaseSTAS, BaseER, Status2, Status, CI_MUhi), ncolumns=10,append=T)
+			
+			full_out <- data.frame(Model = rep(ModName, Ntrials),
+			                     baseER = rep(BaseER, Ntrials),
+			                     baseSTAS = rep(BaseSTAS, Ntrials),
+			                     trial = c(1:Ntrials),
+			                     suc.end = CP[ , 1],
+			                     suc.freq = CP[ ,5]
+			                     )
+			
+			write.table(file=fnout3, full_out, append=T, row.names = F, col.names = F) # Save FULL Simulation Data
+			
+
+		}#end harvest
+	}#end smolt-to-adult survival
+}#end model types
+
+
+end_time <- Sys.time()
+
+end_time - start_time
+
+
+```
+
+
+
+
+
+
+
+
+```{R testing/debugging}
+itype = 1
+iSTAS = STASset[1]
+ih = ERset[1]
+icu = 1
+isim = 1
+iyr = 1
+
+```

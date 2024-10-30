@@ -1,0 +1,357 @@
+---
+title: "FSIM Plots"
+author: "Colin Bailey"
+date: "2024-10-22"
+output: html_document
+---
+
+The plots you care about are FUll_Sum Plots Finall Success - just need to work backwords to create the data that go into that section
+
+
+# Load
+```{r}
+rm(list=ls())
+
+round2 = function(x, digits) {
+  posneg = sign(x)
+  z = abs(x)*10^digits
+  z = z + 0.5 + sqrt(.Machine$double.eps)
+  z = trunc(z)
+  z = z/10^digits
+  z*posneg
+}
+library(openxlsx)
+library(scales)
+library(RColorBrewer); library(tidyverse) 
+library(ggplot2); library(dplyr); library(tidyr)
+library(cowplot)
+theme_set(theme_cowplot())
+
+CUs <- c("Middle_Fraser","Fraser_Canyon","Lower_Thompson","North_Thompson","South_Thompson")
+CUnm <- c("Middle Fraser","Fraser Canyon","Lower Thompson","North Thompson","South Thompson")
+xcol=c('#8c510a','#d8b365','#c7eae5','#5ab4ac','#01665e') # colours of curves et al.
+Ccols <- c("0-0.10" = '#d01c8b', "0.11-0.33" = '#f1b6da', 
+           "0.34-0.65" = '#f7f7f7', 
+           "0.66-0.89" = '#b8e186', "0.90-1" = '#4dac26')
+Ccols2 <- c("< -49" = '#d01c8b', "-49:-30" = '#f1b6da', 
+           "-29:29" = '#f7f7f7', 
+           "30:49" = '#b8e186', "> 49" = '#4dac26')
+```
+
+# Read in Data
+```{r}
+obsr=read.csv(file="Data_in\\IFCoho_SRbyCU.csv",header=T)
+```
+
+# Full_Output Summaries
+```{r}
+full_out <- read.table(paste("Data_out/Fsim_All_Models_Full_Output", ".out", sep = ""), header = T)
+
+full_out$traj_prop <- ifelse(full_out$traj_percent > 0 , 1, 0)
+
+fuller <- unique(full_out$baseER)
+fullSTAS <- unique(full_out$baseSTAS)
+models <- unique(full_out$Model)
+
+STASstable <- c(obsr$STAS_Age_3[obsr$CU_ID == 5 & obsr$BroodYear > 2009], obsr$STAS_Age_4[nrow(obsr)])
+
+aveER = exp(mean(log(c(0.205,	0.358,	0.24,	0.092,	0.097,	0.153,	0.217,	0.137,	0.095))))
+aveSTAS = exp(mean(log(STASstable))) #geometric mean of STAS
+minSTAS = min(fullSTAS)
+maxER = 0.5
+sdER = 0.057
+STASsdlo = exp(mean(log(STASstable))-sd(log(STASstable)))
+STASsdhi = exp(mean(log(STASstable))+sd(log(STASstable)))
+
+```
+
+# Bootstrapped Confidence Intervals
+Never to be run again! Lol. It just took 3 hours... So just need to read in the new file!
+```{r}
+write(file = "Data_out/Fsim_BootStrapped_Data.out", 
+      "baseER baseSTAS prop.fin traj.prop", ncolumns = 1, append = F)
+
+for(er in fuller){
+  full_erA <- full_out[full_out$baseER == er, ]
+
+  for(STAS in fullSTAS){
+    full_datA <- full_erA[full_erA$baseSTAS == STAS, ]
+  
+    for(n in 1:500){
+#    for(n in 1:100){
+    
+      sam <- sample(1500, size = 1500, replace = TRUE)
+#      sam <- sample(300, size = 300, replace = TRUE)
+      
+#            bootdat <- full_datA[sam, ]
+            bootdat <- full_datA[sam, ] %>% na.omit()
+
+      
+      boot_row = data.frame(
+        baseER = er,
+        baseSTAS = STAS,
+        prop.fin = round2(mean(bootdat$end.suc), 2),
+        traj.prop = round(mean(bootdat$traj_prop), 2))
+      
+      write.table(file="Data_out/Fsim_BootStrapped_Data.out",
+          boot_row, append=T, row.names = F, col.names = F)
+    }
+  }
+}
+```
+
+Read in BootStrapped values
+```{r}
+bootCI <- read.table("Data_out/Fsim_BootStrapped_Data.out", header = T)
+```
+
+# Summary Table
+```{r}
+
+write(file = "Data_out/Fsim_Summary_Data.out", 
+      "baseER baseSTAS endsuc endsuc10 endsuc90 freqsuc freq10 freq50 freq90 trajmean traj10 traj50 traj90 trajprop trajpop10 trajpop90", ncolumns = 1, append = F)
+
+for(er in fuller){
+  full_erA <- full_out[full_out$baseER == er, ]
+  boot_erA <- bootCI[bootCI$baseER == er, ]
+  for(STAS in fullSTAS){
+    full_datA <- full_erA[full_erA$baseSTAS == STAS, ]
+    boot_datA <- boot_erA[boot_erA$baseSTAS == STAS, ]
+    
+    full_sum <- data.frame(ER = er,
+                           STAS = STAS,
+                           prop.fin = round(mean(full_datA$end.suc), 2),
+                           prop.fin.10 = round(quantile(boot_datA$prop.fin, prob = 0.1), 2),
+                           prop.fin.90 = round(quantile(boot_datA$prop.fin, prob = 0.9), 2),
+                           prop.all = round(mean(full_datA$freq.suc), 2),
+                           all.10 = round(quantile(full_datA$freq.suc, prob = 0.1), 2),
+                           all.50 = round(quantile(full_datA$freq.suc, prob = 0.5), 2),
+                           all.90 = round(quantile(full_datA$freq.suc, prob = 0.9), 2),
+                           traj.mean = round(mean(full_datA$traj_percent), 0),
+                           traj.10 = round(quantile(full_datA$traj_percent, prob = 0.1), 0),
+                           traj.50 = round(quantile(full_datA$traj_percent, prob = 0.5), 0),
+                           traj.90 = round(quantile(full_datA$traj_percent, prob = 0.9), 0),
+                           traj.prop = round(mean(full_datA$traj_prop), 2),
+                           traj.prop.10 = round(quantile(boot_datA$traj.prop, prob = 0.1), 2),
+                           traj.prop.90 = round(quantile(boot_datA$traj.prop, prob = 0.9), 2))
+    
+#    write.table(file="./Fsim_Full_Output/Fsim_Summary_Data_2.out",
+    write.table(file="Data_out/Fsim_Summary_Data.out",
+          full_sum, append=T, row.names = F, col.names = F)
+  }
+}
+```
+
+
+# Full Summary
+```{r}
+full_summary <- read.table(file="Data_out/Fsim_Summary_Data.out", header = T)
+#full_summary <- read.table(file="./Fsim_Full_Output/Fsim_Summary_Data_2.out", header = T)
+
+full_summary$fros.median <- with(full_summary, paste(freq50, " (", freq10, ", ", freq90, ")", sep = ""))
+full_summary$traj.median <- with(full_summary, paste(traj50, " (", traj10, ", ", traj90, ")", sep = ""))
+
+full_summary$fros.mean <- with(full_summary, paste(freqsuc, " (", freq10, ", ", freq90, ")", sep = ""))
+full_summary$traj.mean <- with(full_summary, paste(trajmean, " (", traj10, ", ", traj90, ")", sep = ""))
+
+full_summary <- full_summary[order(full_summary$baseER, full_summary$baseSTAS), ]
+
+full_summary0 <- full_summary
+
+reduced_summary <- full_summary %>% 
+  filter(baseER %in% c(0, 0.03, 0.068, 0.125, 0.183, 0.20, 0.25, 0.30, 0.35, 0.4, 0.45, 0.5),
+         baseSTAS %in% c(0.003, 0.007, 0.010, 0.016, 0.021, 0.04))
+
+write.csv(reduced_summary, "Data_out/Fsim_Reduced_Summary.csv", row.names = F)
+
+full_summary <- full_summary %>% filter(baseER < 0.51, baseSTAS < 0.041,
+                        baseER != 0.068, baseER != 0.125, baseER != 0.183,
+                        baseSTAS != 0.0045, baseSTAS != 0.0141, baseSTAS != 0.0237)
+
+fros.median <- data.frame(Exploitation.Rate = unique(full_summary$baseER),  
+                    matrix(full_summary$fros.median, 
+                           nrow = length(unique(full_summary$baseER)), 
+                           ncol = length(unique(full_summary$baseSTAS)), 
+                           byrow = TRUE))
+
+colnames(fros.median)[2:ncol(fros.median)] <- unique(full_summary$baseSTAS)
+
+traj.median <- data.frame(Exploitation.Rate = unique(full_summary$baseER),  
+                    matrix(full_summary$traj.median, 
+                           nrow = length(unique(full_summary$baseER)), 
+                           ncol = length(unique(full_summary$baseSTAS)), 
+                           byrow = TRUE))
+
+colnames(traj.median)[2:ncol(traj.median)] <- unique(full_summary$baseSTAS)
+
+traj.mean <- data.frame(Exploitation.Rate = unique(full_summary$baseER),  
+                    matrix(full_summary$traj.mean, 
+                           nrow = length(unique(full_summary$baseER)), 
+                           ncol = length(unique(full_summary$baseSTAS)), 
+                           byrow = TRUE))
+
+colnames(traj.mean)[2:ncol(traj.mean)] <- unique(full_summary$baseSTAS)
+
+fin.prop <- data.frame(Exploitation.Rate = unique(full_summary$baseER),  
+                    matrix(full_summary$endsuc, 
+                           nrow = length(unique(full_summary$baseER)), 
+                           ncol = length(unique(full_summary$baseSTAS)), 
+                           byrow = TRUE))
+
+colnames(fin.prop)[2:ncol(fin.prop)] <- unique(full_summary$baseSTAS)
+
+traj.prop <- data.frame(Exploitation.Rate = unique(full_summary$baseER),  
+                    matrix(full_summary$trajprop, 
+                           nrow = length(unique(full_summary$baseER)), 
+                           ncol = length(unique(full_summary$baseSTAS)), 
+                           byrow = TRUE))
+
+colnames(traj.prop)[2:ncol(traj.prop)] <- unique(full_summary$baseSTAS)
+
+```
+
+### Reduced
+```{r}
+fros.medianR <- data.frame(Exploitation.Rate = unique(reduced_summary$baseER),  
+                    matrix(reduced_summary$fros.median, 
+                           nrow = length(unique(reduced_summary$baseER)), 
+                           ncol = length(unique(reduced_summary$baseSTAS)), 
+                           byrow = TRUE))
+
+colnames(fros.medianR)[2:ncol(fros.medianR)] <- unique(reduced_summary$baseSTAS)
+
+traj.medianR <- data.frame(Exploitation.Rate = unique(reduced_summary$baseER),  
+                    matrix(reduced_summary$traj.median, 
+                           nrow = length(unique(reduced_summary$baseER)), 
+                           ncol = length(unique(reduced_summary$baseSTAS)), 
+                           byrow = TRUE))
+
+colnames(traj.medianR)[2:ncol(traj.medianR)] <- unique(reduced_summary$baseSTAS)
+
+traj.meanR <- data.frame(Exploitation.Rate = unique(reduced_summary$baseER),  
+                    matrix(reduced_summary$traj.mean, 
+                           nrow = length(unique(reduced_summary$baseER)), 
+                           ncol = length(unique(reduced_summary$baseSTAS)), 
+                           byrow = TRUE))
+
+colnames(traj.meanR)[2:ncol(traj.meanR)] <- unique(reduced_summary$baseSTAS)
+
+fin.propR <- data.frame(Exploitation.Rate = unique(reduced_summary$baseER),  
+                    matrix(reduced_summary$endsuc, 
+                           nrow = length(unique(reduced_summary$baseER)), 
+                           ncol = length(unique(reduced_summary$baseSTAS)), 
+                           byrow = TRUE))
+
+colnames(fin.propR)[2:ncol(fin.propR)] <- unique(reduced_summary$baseSTAS)
+
+traj.propR <- data.frame(Exploitation.Rate = unique(reduced_summary$baseER),  
+                    matrix(reduced_summary$trajprop, 
+                           nrow = length(unique(reduced_summary$baseER)), 
+                           ncol = length(unique(reduced_summary$baseSTAS)), 
+                           byrow = TRUE))
+
+colnames(traj.propR)[2:ncol(traj.propR)] <- unique(reduced_summary$baseSTAS)
+
+```
+
+### FS Categories
+```{r}
+full_summary %>% filter(baseSTAS <0.031) %>%
+  mutate(endsucC = ifelse(endsuc < 0.11, "0-0.10", 
+                          ifelse(endsuc >= 0.11 & endsuc <= 0.33, "0.11-0.33",
+                                 ifelse(endsuc > 0.33 & endsuc < 0.66, "0.34-0.65",
+                                        ifelse(endsuc >= 0.66 & endsuc < 0.9, "0.66-0.89", 
+                                               "0.90-1"))))) %>%
+ggplot(aes(x = baseSTAS, y = baseER, fill = endsucC, z = endsucC)) +
+  geom_raster() +
+  scale_y_reverse(expand = c(0, 0)) +
+  scale_fill_manual(values = Ccols,
+                       name = "Proportion of 'Final Success'") +
+  theme(legend.position = "top", legend.text = element_text(size = 10),
+        legend.title = element_text(size = 13)) +
+  guides(fill = guide_legend(ncol = 2), title.position = "top") +
+  labs(y = "Exploitation Rate", x = "Marine Survival") +
+  #geom_contour() +
+  scale_x_continuous(expand = c(0, 0)) +
+  geom_segment(aes(x = minSTAS-0.0005, y = 0.15, xend = aveSTAS, yend = 0.15),
+               colour = "blue", size = 1.2, alpha = 0.1) +
+  geom_segment(aes(x = minSTAS-0.0005, y = 0.36, xend = aveSTAS, yend = 0.36),
+               colour = "blue", size = 1.2, alpha = 0.1) +
+  geom_segment(aes(x = minSTAS-0.0005, y = 0.2, xend = aveSTAS, yend = 0.2),
+               colour = "blue", size = 1.2, alpha = 0.1) +
+  geom_segment(aes(x = minSTAS-0.0005, y = 0.3, xend = aveSTAS, yend = 0.3),
+               colour = "blue", size = 1.2, alpha = 0.1) +
+  geom_segment(aes(x = minSTAS-0.0005, y = 0.45, xend = aveSTAS, yend = 0.45),
+               colour = "blue", size = 1.2, alpha = 0.1) +
+  geom_segment(aes(x = aveSTAS, y = 0.15, xend = aveSTAS, yend = maxER),
+               colour = "blue", size = 1.2, alpha = 0.1) +
+  annotate("text", x = aveSTAS + 0.001, y = 0.15, label = "3 Generation Mean", hjust = 0)+
+  annotate("text", x = aveSTAS + 0.001, y = 0.35, label = "Umsy", hjust = 0)+
+  annotate("text", x = aveSTAS + 0.001, y = 0.2, label = "PST Low", hjust = 0)+
+  annotate("text", x = aveSTAS + 0.001, y = 0.3, label = "PST Moderate", hjust = 0)+
+  annotate("text", x = aveSTAS + 0.001, y = 0.45, label = "PST Abundant", hjust = 0)
+  # geom_segment(aes(x = minSTAS-0.0005, y = aveER+sdER, xend = STASsdlo, yend = aveER+sdER), 
+  #              colour = "gray", linetype = 2, size = 1.2, alpha = 0.1) +
+  # geom_segment(aes(x = minSTAS-0.0005, y = aveER-sdER, xend = STASsdhi, yend = aveER-sdER), 
+  #              colour = "gray", linetype = 2, size = 1.2, alpha = 0.1) +
+  # geom_segment(aes(x = STASsdlo, y = maxER, xend = STASsdlo, yend = aveER+sdER), 
+  #              colour = "gray", linetype = 2, size = 1.2, alpha = 0.1) +
+  # geom_segment(aes(x = STASsdhi, y = maxER, xend = STASsdhi, yend = aveER-sdER), 
+  #              colour = "gray", linetype = 2, size = 1.2, alpha = 0.1)
+  
+ggsave(filename = paste("Data_out/", "Full_Sum_Final_Success_Cate_65",".png", sep = ""),
+       width = 5, height = 5.75, units = "in", dpi = 500)
+```
+
+### PT Categories
+```{r}
+full_summary %>% filter(baseSTAS <0.031) %>%
+  mutate(trajpropC = ifelse(trajprop < 0.11, "0-0.10", 
+                          ifelse(trajprop >= 0.11 & trajprop <= 0.33, "0.11-0.33",
+                                 ifelse(trajprop > 0.33 & trajprop < 0.66, "0.34-0.65",
+                                        ifelse(trajprop >= 0.66 & trajprop < 0.9, "0.66-0.89", 
+                                               "0.90-1"))))) %>%
+ggplot(aes(x = baseSTAS, y = baseER, fill = trajpropC, z = trajpropC)) +
+  geom_raster() +
+  
+  scale_y_reverse(expand = c(0, 0)) +
+  scale_fill_manual(values = Ccols,
+                       name = "Proportion of 'Positive Trajectories'") +
+  theme(legend.position = "top", legend.text = element_text(size = 10),
+        legend.title = element_text(size = 13)) +
+  guides(fill = guide_legend(ncol = 2), title.position = "top") +
+  labs(y = "Exploitation Rate", x = "Marine Survival") +
+  #geom_contour() +
+  scale_x_continuous(expand = c(0, 0)) +
+  geom_segment(aes(x = minSTAS-0.0005, y = 0.15, xend = aveSTAS, yend = 0.15),
+               colour = "blue", size = 1.2, alpha = 0.1) +
+  geom_segment(aes(x = minSTAS-0.0005, y = 0.36, xend = aveSTAS, yend = 0.36),
+               colour = "blue", size = 1.2, alpha = 0.1) +
+  geom_segment(aes(x = minSTAS-0.0005, y = 0.2, xend = aveSTAS, yend = 0.2),
+               colour = "blue", size = 1.2, alpha = 0.1) +
+  geom_segment(aes(x = minSTAS-0.0005, y = 0.3, xend = aveSTAS, yend = 0.3),
+               colour = "blue", size = 1.2, alpha = 0.1) +
+  geom_segment(aes(x = minSTAS-0.0005, y = 0.45, xend = aveSTAS, yend = 0.45),
+               colour = "blue", size = 1.2, alpha = 0.1) +
+  geom_segment(aes(x = aveSTAS, y = 0.15, xend = aveSTAS, yend = maxER),
+               colour = "blue", size = 1.2, alpha = 0.1) +
+  annotate("text", x = aveSTAS + 0.001, y = 0.15, label = "3 Generation Mean", hjust = 0)+
+  annotate("text", x = aveSTAS + 0.001, y = 0.35, label = "Umsy", hjust = 0)+
+  annotate("text", x = aveSTAS + 0.001, y = 0.2, label = "PST Low", hjust = 0)+
+  annotate("text", x = aveSTAS + 0.001, y = 0.3, label = "PST Moderate", hjust = 0)+
+  annotate("text", x = aveSTAS + 0.001, y = 0.45, label = "PST Abundant", hjust = 0) #+
+  
+  #geom_segment(aes(x = minSTAS-0.0005, y = aveER+sdER, xend = STASsdlo, yend = aveER+sdER), 
+               #colour = "gray", linetype = 2, size = 1.2, alpha = 0.1) +
+  #geom_segment(aes(x = minSTAS-0.0005, y = aveER-sdER, xend = STASsdhi, yend = aveER-sdER), 
+               #colour = "gray", linetype = 2, size = 1.2, alpha = 0.1) +
+  #geom_segment(aes(x = STASsdlo, y = maxER, xend = STASsdlo, yend = aveER+sdER), 
+               #colour = "gray", linetype = 2, size = 1.2, alpha = 0.1) +
+  #geom_segment(aes(x = STASsdhi, y = maxER, xend = STASsdhi, yend = aveER-sdER), 
+               #colour = "gray", linetype = 2, size = 1.2, alpha = 0.1)
+
+
+ggsave(filename = paste("Data_out/", "Full_Sum_Positive_Traj_Cate",".png", sep = ""),
+       width = 5, height = 5.75, units = "in", dpi = 500)
+```
+

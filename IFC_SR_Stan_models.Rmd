@@ -84,8 +84,8 @@ fit_nocap <- readRDS("fit_nocap.rds")
 
 #fit summary
 mf <- summary(fit_nocap)$summary
-srdat$pred <- mf[36:130,1]
-srdat$pred_rec <- mf[131:225,1]
+srdat$pred <- mf[36:140,1]
+srdat$pred_rec <- mf[141:245,1]
 
 
 ###residual checks###
@@ -220,7 +220,6 @@ fit_cap <- stan(file = "IFC_SR_priorcap_model.stan", data = datcap, chains=6,
 saveRDS(fit_cap, file = "fit_priorcap.rds")
 fit_cap <- readRDS("fit_priorcap.rds")
 
-
 # #pairs plots
 # pairs(fit_cap, pars = c("alpha"))
 # pairs(fit_cap, pars = c("beta"))
@@ -230,8 +229,8 @@ fit_cap <- readRDS("fit_priorcap.rds")
 
 #fit summary
 mf <- summary(fit_cap)$summary
-srdat$pred_cap <- mf[36:130,1]
-srdat$pred_rec_cap <- mf[131:225,1]
+srdat$pred_cap <- mf[36:140,1]
+srdat$pred_rec_cap <- mf[141:245,1]
 
 
 ###residual checks###
