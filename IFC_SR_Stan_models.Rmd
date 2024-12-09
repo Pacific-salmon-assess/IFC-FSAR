@@ -189,7 +189,7 @@ para
 
 ```
 
-Simple linearized Ricker models with a survival covariate and a strong prior on spawners at replacement (Srep), which limits the value of beta (see the transformed parameters section for the relationship between beta and srep). There is a separate model for each of the 5 CUs as previous work by Holt et al. (2023) indicate that hierarchical models with random slopes by CU performed more poorly.
+Simple linearized Ricker models with a survival covariate and a strong prior on spawners at replacement (Srep), which limits the value of beta (see the transformed parameters section for the relationship between beta and srep). There is a separate model for each of the 5 CUs as previous work by Holt et al. (2023) indicate that hierarchical models with random slopes by CU performed more poorly. This model is kept as a reference, but does not influence the main results of the current 2022 IFC stock assessment.
 ```{r Ricker Models w/ Srep cap}
 
 #dataset for the model without an Srep cap
@@ -208,7 +208,7 @@ datcap <- list("N" = max(srdat$yr_num), #number of years of data
             "mlogit_surv3" = mean(logit(srdat$STAS_Age_3)),
             "mlogit_surv4" = mean(logit(srdat$STAS_Age_4)),
             "mu_rep" = pull(para %>% filter(variable == "srep") %>% dplyr::select(x_bar)) * 1.4,
-            "sig_rep" = 1414) 
+            "sig_rep" = 1414)
 
 #running the Stan model
 fit_cap <- stan(file = "IFC_SR_priorcap_model.stan", data = datcap, chains=6,
@@ -271,23 +271,23 @@ srdat %>% ggplot(aes(x = lnRS, y = pred_cap))+
 prop <- srdat %>% group_by(CU_Name) %>% summarize(m_prop3 = mean(p_3), m_prop4 = mean(p_4))
 
 MF <- function(x){
-  y = exp((pull(prop[3,2]) * (mf[6,1] * (x/1000) + mf[11,1] * mlogit_surv3 + mf[1,1])) + 
+  y = exp((pull(prop[3,2]) * (mf[6,1] * (x/1000) + mf[11,1] * mlogit_surv3 + mf[1,1])) +
     (pull(prop[3,3]) * (mf[6,1] * (x/1000) + mf[11,1] * mlogit_surv4 + mf[1,1]))) * x
 }
 FC <- function(x){
-  y = exp((pull(prop[1,2]) * (mf[7,1] * (x/1000) + mf[12,1] * mlogit_surv3 + mf[2,1])) + 
+  y = exp((pull(prop[1,2]) * (mf[7,1] * (x/1000) + mf[12,1] * mlogit_surv3 + mf[2,1])) +
     (pull(prop[1,3]) * (mf[7,1] * (x/1000) + mf[12,1] * mlogit_surv4 + mf[2,1]))) * x
 }
 LT <- function(x){
-   y = exp((pull(prop[2,2]) * (mf[8,1] * (x/1000) + mf[13,1] * mlogit_surv3 + mf[3,1])) + 
+   y = exp((pull(prop[2,2]) * (mf[8,1] * (x/1000) + mf[13,1] * mlogit_surv3 + mf[3,1])) +
     (pull(prop[2,3]) * (mf[8,1] * (x/1000) + mf[13,1] * mlogit_surv4 + mf[3,1]))) * x
 }
 NT <- function(x){
-  y = exp((pull(prop[4,2]) * (mf[9,1] * (x/1000) + mf[14,1] * mlogit_surv3 + mf[4,1])) + 
+  y = exp((pull(prop[4,2]) * (mf[9,1] * (x/1000) + mf[14,1] * mlogit_surv3 + mf[4,1])) +
     (pull(prop[4,3]) * (mf[9,1] * (x/1000) + mf[14,1] * mlogit_surv4 + mf[4,1]))) * x
 }
 ST <- function(x){
-  y = exp((pull(prop[5,2]) * (mf[10,1] * (x/1000) + mf[15,1] * mlogit_surv3 + mf[5,1])) + 
+  y = exp((pull(prop[5,2]) * (mf[10,1] * (x/1000) + mf[15,1] * mlogit_surv3 + mf[5,1])) +
     (pull(prop[5,3]) * (mf[10,1] * (x/1000) + mf[15,1] * mlogit_surv4 + mf[5,1]))) * x
 }
 
@@ -319,16 +319,16 @@ variable <- c(rep("alpha", length(unique(srdat$CU_Name))), rep("beta", length(un
 CU <- rep(unique(srdat$CU_Name), length(unique(variable)))
 
 param <- data.frame(CU, variable)
-param$x_bar <- mf[1:35,1] 
-param$CI_02.5 <- mf[1:35,4] 
+param$x_bar <- mf[1:35,1]
+param$CI_02.5 <- mf[1:35,4]
 param$CI_50.0 <- mf[1:35,6]
 param$CI_97.5 <- mf[1:35,8]
 
-#object "para" has all of the parameter estimates 
+#object "para" has all of the parameter estimates
 para_cap <- param %>% mutate(x_bar = ifelse(variable == "alpha", exp(x_bar), x_bar),
                  CI_02.5 = ifelse(variable == "alpha", exp(CI_02.5), CI_02.5),
                  CI_50.0 = ifelse(variable == "alpha", exp(CI_50.0), CI_50.0),
-                 CI_97.5 = ifelse(variable == "alpha", exp(CI_97.5), CI_97.5)) 
+                 CI_97.5 = ifelse(variable == "alpha", exp(CI_97.5), CI_97.5))
 
 para_cap
 
@@ -406,10 +406,10 @@ write.csv(sgen_summary, "Data_out/sgen_summary.csv")
 Extracting posteriors from the no-cap and prior cap models to calculate the average parameter values and credible intervals for 80% smsy and umsy. 
 ```{r calculate mean and CIs for 80% smsy & umsy}
 
-#smsy summary
+#smsy summary - turned off the combination of the prior_Cap model posterior, so now the results are solely influenced by the baseline Ricker curve
 smsy_nc <- as.data.frame(extract(fit_nocap, pars = "smsy_80")$smsy_80)
 smsy_c <- as.data.frame(extract(fit_cap, pars = "smsy_80")$smsy_80)
-smsy <- rbind(smsy_nc, smsy_c)
+smsy <- smsy_nc #rbind(smsy_nc, smsy_c)
 
 #summarizing sgen by CU
 CU_Name = c("Middle_Fraser", "Fraser_Canyon", "Lower_Thompson", "North_Thompson", "South_Thompson")
@@ -428,10 +428,10 @@ smsy_summary
 
 write.csv(smsy_summary, "Data_out/smsy_summary.csv")
 
-#umsy summary
+#umsy summary - turned off the combination of the prior_Cap model posterior, so now the results are solely influenced by the baseline Ricker curve
 umsy_nc <- as.data.frame(extract(fit_nocap, pars = "umsy")$umsy)
-umsy_c <- as.data.frame(extract(fit_cap, pars = "umsy")$umsy)
-umsy <- rbind(umsy_nc, umsy_c)
+#umsy_c <- as.data.frame(extract(fit_cap, pars = "umsy")$umsy)
+umsy <- umsy_nc #rbind(umsy_nc, umsy_c)
 
 #summarizing sgen by CU
 CU_Name = c("Middle_Fraser", "Fraser_Canyon", "Lower_Thompson", "North_Thompson", "South_Thompson")
@@ -452,3 +452,16 @@ write.csv(umsy_summary, "Data_out/umsy_summary.csv")
 ```
 
 
+```{r calculate 1 gen mean escapement}
+cd <- read.csv("Data_in/IFCoho_escpByCU.csv")
+head(cd)
+cd5yr <- as.data.frame(cd %>% group_by(ReturnYear) %>% summarize(sum(Escapement)) %>% filter(ReturnYear %in% c(2015:2022)))
+
+out_means <- rep(0,5)
+
+for(i in 4:8){
+  x <- c(cd5yr[i-2, 2],cd5yr[i-1, 2],cd5yr[i, 2])
+  out_means[i-3] = exp(mean(log(x)))
+}
+
+```

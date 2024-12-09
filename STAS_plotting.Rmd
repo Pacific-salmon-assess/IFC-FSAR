@@ -1,0 +1,26 @@
+---
+title: "STAS plotting"
+author: "Colin Bailey"
+date: "2024-11-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+
+STAS <- read.csv("Data_in\\STAS.csv")
+
+STAS %>% filter(brood_year >= 1985) %>% 
+  ggplot(aes(x = brood_year, y = stas*100))+
+  geom_line()+
+  theme_classic()+
+  labs(x = "Brood year", y = "Smolt-to-adult survival (%)")+
+  geom_hline(yintercept = 6.3, linetype = "dashed", size = 0.8, colour = "#01665e")+
+  geom_hline(yintercept = 1.5, linetype = "dashed", size = 0.8, colour = "#d01c8b")+
+  theme(axis.text = element_text(size = 10), axis.title = element_text(size = 9))
+
+ggsave("STAS_plot.png", units = "in", height = 4, width = 6, dpi = 500)
+```
+

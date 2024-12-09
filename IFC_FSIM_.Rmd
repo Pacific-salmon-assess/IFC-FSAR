@@ -27,7 +27,12 @@ Ricker_PriorCap_mod <- readRDS("fit_priorcap.rds")
 Ricker <- as.data.frame(extract(Ricker_mod, pars = c("alpha", "beta", "gamma", "sigma")))
 write.csv(Ricker, "Ricker.csv")
 
-Ricker_PriorCap <- as.data.frame(extract(Ricker_PriorCap_mod, pars = c("alpha", "beta", "gamma", "sigma")))
+#Commented out code that when active, blends the parameter estimates from both the baseline model and the PriorCap model - activate code to simulate with the influence of the strong prior on capacity
+# Ricker_PriorCap <- as.data.frame(extract(Ricker_PriorCap_mod, pars = c("alpha", "beta", "gamma", "sigma")))
+# write.csv(Ricker_PriorCap, "Ricker_PriorCap.csv")
+
+#Altered version of the commented out code above that just pulls in the results of the baseline model (as in lines 27-28) - comment out the next 2 lines if activating the PriorCap model
+Ricker_PriorCap <- as.data.frame(extract(Ricker_mod, pars = c("alpha", "beta", "gamma", "sigma")))
 write.csv(Ricker_PriorCap, "Ricker_PriorCap.csv")
 
 ```
@@ -51,8 +56,8 @@ Ntrials=500	# of trials to simulate (there is a precedent for running 500 trials
 #Ntrials=10	# of trials to simulate - how many times do you want it to run for each combination of exploitation rate and survival (set to 500 once everythign is running)
 
 CUname=c("Middle_Fraser","Fraser_Canyon","Lower_Thompson","North_Thompson","South_Thompson","IFC SMU")
-#MUbench=33500			 	 #IFC SMU Target where there is a 66% probability of all CUs being amber or better status
-MUbench=65300			 	 #IFC SMU Target where there is a 90% probability of all CUs being amber or better status
+#MUbench=24900			 	 #IFC SMU Target where there is a 66% probability of all CUs being amber or better status
+MUbench=41100			 	 #IFC SMU Target where there is a 90% probability of all CUs being amber or better status
 
 
 fyr=2018;lyr=fyr+14;Yr=seq(fyr,lyr);Nyrs=length(Yr)

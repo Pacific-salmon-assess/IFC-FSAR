@@ -264,13 +264,13 @@ full_summary %>% filter(baseSTAS <0.031) %>%
                                                "0.90-1"))))) %>%
 ggplot(aes(x = baseSTAS, y = baseER, fill = endsucC, z = endsucC)) +
   geom_raster() +
-  scale_y_reverse(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))+
   scale_fill_manual(values = Ccols,
-                       name = "Proportion of 'Final Success'") +
+                    name = "Proportion of 'Final Success'") +
   theme(legend.position = "top", legend.text = element_text(size = 10),
         legend.title = element_text(size = 13)) +
   guides(fill = guide_legend(ncol = 2), title.position = "top") +
-  labs(y = "Exploitation Rate", x = "Marine Survival") +
+  labs(y = "Exploitation Rate", x = "Smolt-to-Adult Survival") +
   #geom_contour() +
   scale_x_continuous(expand = c(0, 0)) +
   geom_segment(aes(x = minSTAS-0.0005, y = 0.15, xend = aveSTAS, yend = 0.15),
@@ -283,24 +283,28 @@ ggplot(aes(x = baseSTAS, y = baseER, fill = endsucC, z = endsucC)) +
                colour = "blue", size = 1.2, alpha = 0.1) +
   geom_segment(aes(x = minSTAS-0.0005, y = 0.45, xend = aveSTAS, yend = 0.45),
                colour = "blue", size = 1.2, alpha = 0.1) +
-  geom_segment(aes(x = aveSTAS, y = 0.15, xend = aveSTAS, yend = maxER),
+  geom_segment(aes(x = aveSTAS, y = 0.45, xend = aveSTAS, yend = 0),
                colour = "blue", size = 1.2, alpha = 0.1) +
-  annotate("text", x = aveSTAS + 0.001, y = 0.15, label = "3 Generation Mean", hjust = 0)+
-  annotate("text", x = aveSTAS + 0.001, y = 0.35, label = "Umsy", hjust = 0)+
-  annotate("text", x = aveSTAS + 0.001, y = 0.2, label = "PST Low", hjust = 0)+
-  annotate("text", x = aveSTAS + 0.001, y = 0.3, label = "PST Moderate", hjust = 0)+
-  annotate("text", x = aveSTAS + 0.001, y = 0.45, label = "PST Abundant", hjust = 0)
-  # geom_segment(aes(x = minSTAS-0.0005, y = aveER+sdER, xend = STASsdlo, yend = aveER+sdER), 
-  #              colour = "gray", linetype = 2, size = 1.2, alpha = 0.1) +
-  # geom_segment(aes(x = minSTAS-0.0005, y = aveER-sdER, xend = STASsdhi, yend = aveER-sdER), 
-  #              colour = "gray", linetype = 2, size = 1.2, alpha = 0.1) +
-  # geom_segment(aes(x = STASsdlo, y = maxER, xend = STASsdlo, yend = aveER+sdER), 
-  #              colour = "gray", linetype = 2, size = 1.2, alpha = 0.1) +
-  # geom_segment(aes(x = STASsdhi, y = maxER, xend = STASsdhi, yend = aveER-sdER), 
-  #              colour = "gray", linetype = 2, size = 1.2, alpha = 0.1)
+  geom_segment(aes(x = aveSTAS-0.0005, y = 0.15, xend = 0.021, yend = 0.15),
+               colour = "blue", size = 1.2, alpha = 0.1, linetype = "dashed") +
+  geom_segment(aes(x = aveSTAS-0.0005, y = 0.36, xend = 0.021, yend = 0.36),
+               colour = "blue", size = 1.2, alpha = 0.1, linetype = "dashed") +
+  geom_segment(aes(x = aveSTAS-0.0005, y = 0.2, xend = 0.021, yend = 0.2),
+               colour = "blue", size = 1.2, alpha = 0.1, linetype = "dashed") +
+  geom_segment(aes(x = aveSTAS-0.0005, y = 0.3, xend = 0.021, yend = 0.3),
+               colour = "blue", size = 1.2, alpha = 0.1, linetype = "dashed") +
+  geom_segment(aes(x = aveSTAS-0.0005, y = 0.45, xend = 0.021, yend = 0.45),
+               colour = "blue", size = 1.2, alpha = 0.1, linetype = "dashed") +
+  geom_segment(aes(x = 0.021, y = 0.45, xend = 0.021, yend = 0),
+               colour = "blue", size = 1.2, alpha = 0.1, linetype = "dashed") +
+  annotate("text", x = aveSTAS + 0.001, y = 0.16, label = "3 Generation Mean", hjust = 0, size = 3)+
+  annotate("text", x = aveSTAS + 0.001, y = 0.37, label = "Umsy", hjust = 0, size = 3)+
+  annotate("text", x = aveSTAS + 0.001, y = 0.21, label = "PST Low", hjust = 0, size = 3)+
+  annotate("text", x = aveSTAS + 0.001, y = 0.31, label = "PST Moderate", hjust = 0, size = 3)+
+  annotate("text", x = aveSTAS + 0.001, y = 0.46, label = "PST Abundant", hjust = 0, size = 3)
   
-ggsave(filename = paste("Data_out/", "Full_Sum_Final_Success_Cate_65",".png", sep = ""),
-       width = 5, height = 5.75, units = "in", dpi = 500)
+ggsave(filename = paste("Data_out/", "Full_Sum_Final_Success_Cate_41K",".png", sep = ""),
+       width = 6, height = 6.75, units = "in", dpi = 500)
 ```
 
 ### PT Categories
@@ -314,13 +318,13 @@ full_summary %>% filter(baseSTAS <0.031) %>%
 ggplot(aes(x = baseSTAS, y = baseER, fill = trajpropC, z = trajpropC)) +
   geom_raster() +
   
-  scale_y_reverse(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
   scale_fill_manual(values = Ccols,
                        name = "Proportion of 'Positive Trajectories'") +
   theme(legend.position = "top", legend.text = element_text(size = 10),
         legend.title = element_text(size = 13)) +
   guides(fill = guide_legend(ncol = 2), title.position = "top") +
-  labs(y = "Exploitation Rate", x = "Marine Survival") +
+  labs(y = "Exploitation Rate", x = "Smolt-to-Adult Survival") +
   #geom_contour() +
   scale_x_continuous(expand = c(0, 0)) +
   geom_segment(aes(x = minSTAS-0.0005, y = 0.15, xend = aveSTAS, yend = 0.15),
@@ -333,25 +337,28 @@ ggplot(aes(x = baseSTAS, y = baseER, fill = trajpropC, z = trajpropC)) +
                colour = "blue", size = 1.2, alpha = 0.1) +
   geom_segment(aes(x = minSTAS-0.0005, y = 0.45, xend = aveSTAS, yend = 0.45),
                colour = "blue", size = 1.2, alpha = 0.1) +
-  geom_segment(aes(x = aveSTAS, y = 0.15, xend = aveSTAS, yend = maxER),
+  geom_segment(aes(x = aveSTAS, y = 0.45, xend = aveSTAS, yend = 0),
                colour = "blue", size = 1.2, alpha = 0.1) +
-  annotate("text", x = aveSTAS + 0.001, y = 0.15, label = "3 Generation Mean", hjust = 0)+
-  annotate("text", x = aveSTAS + 0.001, y = 0.35, label = "Umsy", hjust = 0)+
-  annotate("text", x = aveSTAS + 0.001, y = 0.2, label = "PST Low", hjust = 0)+
-  annotate("text", x = aveSTAS + 0.001, y = 0.3, label = "PST Moderate", hjust = 0)+
-  annotate("text", x = aveSTAS + 0.001, y = 0.45, label = "PST Abundant", hjust = 0) #+
-  
-  #geom_segment(aes(x = minSTAS-0.0005, y = aveER+sdER, xend = STASsdlo, yend = aveER+sdER), 
-               #colour = "gray", linetype = 2, size = 1.2, alpha = 0.1) +
-  #geom_segment(aes(x = minSTAS-0.0005, y = aveER-sdER, xend = STASsdhi, yend = aveER-sdER), 
-               #colour = "gray", linetype = 2, size = 1.2, alpha = 0.1) +
-  #geom_segment(aes(x = STASsdlo, y = maxER, xend = STASsdlo, yend = aveER+sdER), 
-               #colour = "gray", linetype = 2, size = 1.2, alpha = 0.1) +
-  #geom_segment(aes(x = STASsdhi, y = maxER, xend = STASsdhi, yend = aveER-sdER), 
-               #colour = "gray", linetype = 2, size = 1.2, alpha = 0.1)
+  geom_segment(aes(x = aveSTAS-0.0005, y = 0.15, xend = 0.021, yend = 0.15),
+               colour = "blue", size = 1.2, alpha = 0.1, linetype = "dashed") +
+  geom_segment(aes(x = aveSTAS-0.0005, y = 0.36, xend = 0.021, yend = 0.36),
+               colour = "blue", size = 1.2, alpha = 0.1, linetype = "dashed") +
+  geom_segment(aes(x = aveSTAS-0.0005, y = 0.2, xend = 0.021, yend = 0.2),
+               colour = "blue", size = 1.2, alpha = 0.1, linetype = "dashed") +
+  geom_segment(aes(x = aveSTAS-0.0005, y = 0.3, xend = 0.021, yend = 0.3),
+               colour = "blue", size = 1.2, alpha = 0.1, linetype = "dashed") +
+  geom_segment(aes(x = aveSTAS-0.0005, y = 0.45, xend = 0.021, yend = 0.45),
+               colour = "blue", size = 1.2, alpha = 0.1, linetype = "dashed") +
+  geom_segment(aes(x = 0.021, y = 0.45, xend = 0.021, yend = 0),
+               colour = "blue", size = 1.2, alpha = 0.1, linetype = "dashed") +
+  annotate("text", x = aveSTAS + 0.001, y = 0.16, label = "3 Generation Mean", hjust = 0, size = 3)+
+  annotate("text", x = aveSTAS + 0.001, y = 0.37, label = "Umsy", hjust = 0, size = 3)+
+  annotate("text", x = aveSTAS + 0.001, y = 0.21, label = "PST Low", hjust = 0, size = 3)+
+  annotate("text", x = aveSTAS + 0.001, y = 0.31, label = "PST Moderate", hjust = 0, size = 3)+
+  annotate("text", x = aveSTAS + 0.001, y = 0.46, label = "PST Abundant", hjust = 0, size = 3)
 
 
 ggsave(filename = paste("Data_out/", "Full_Sum_Positive_Traj_Cate",".png", sep = ""),
-       width = 5, height = 5.75, units = "in", dpi = 500)
+       width = 6, height = 6.75, units = "in", dpi = 500)
 ```
 
