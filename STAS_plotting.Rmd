@@ -24,3 +24,29 @@ STAS %>% filter(brood_year >= 1985) %>%
 ggsave("STAS_plot.png", units = "in", height = 4, width = 6, dpi = 500)
 ```
 
+
+
+```{r CU 4 panels}
+dat <- readRDS("~/DATA/1975-2023 IFR COHO_ESC_MASTER_Full.rds")
+
+cu_esc <- dat %>% filter(WSP.2014.Data.Use.Categories != "not used" & ReturnYear %in% c(1984:2022)) %>% 
+  group_by(ReturnYear, ConservationUnit) %>% 
+  summarize(esc = sum(Natural.Returns, na.rm = T),
+            rec = sum(prefishery.return.natural, na.rm = T))
+
+cu_esc %>% filter(ReturnYear %in% c(1984:2022)) %>% ggplot(aes(x = ReturnYear, y = esc))+
+  geom_line()+
+  facet_wrap(.~ ConservationUnit)+
+  theme_classic()
+
+cu_esc %>% filter(ReturnYear %in% c(1984:2022)) %>% ggplot(aes(x = ReturnYear, y = rec))+
+  geom_line()+
+  facet_wrap(.~ ConservationUnit)+
+  theme_classic()
+
+cu_esc %>% filter(ReturnYear %in% c(1984:2022)) %>% ggplot(aes(x = ReturnYear, y = catch))+
+  geom_line()+
+  facet_wrap(.~ ConservationUnit)+
+  theme_classic()
+
+```

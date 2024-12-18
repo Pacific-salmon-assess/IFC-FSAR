@@ -311,12 +311,12 @@ end_time - start_time
 
 
 ```{r test sim}
-
-itype = 1
-istas = STASset[1]
-ih = ERset[1]
-icu = 1
-isim = 1
-iyr = 1
+# 
+# itype = 1
+# istas = STASset[1]
+# ih = ERset[1]
+# icu = 1
+# isim = 1
+# iyr = 1
 
 ```
